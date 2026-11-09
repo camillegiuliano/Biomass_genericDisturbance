@@ -1,0 +1,297 @@
+---
+title: "Biomass_genericDisturbance"
+author: ""
+date: "Last updated: `r Sys.Date()`"
+output:
+  bookdown::html_document2:
+    toc: true
+    toc_float: true
+    theme: sandstone
+    number_sections: false
+    df_print: paged
+    keep_md: yes
+editor_options:
+  chunk_output_type: console
+bibliography: citations/references_Biomass_genericDisturbance.bib
+citation-style: citations/ecology-letters.csl
+link-citations: true
+always_allow_html: true
+---
+
+# Biomass_genericDisturbance
+
+:::{.rmdnote}
+This module applies **your** disturbance function at the right moment in a simulation. It
+contains no disturbance science of its own.
+:::
+
+## What this module is for
+
+In a landscape simulation, disturbances usually arrive in two stages. One module works out
+*where and when* something happened — which stands were harvested, which pixels burned,
+where an insect outbreak spread. A second step then works out *what that does to the
+forest* — which cohorts die, how much biomass is removed, what regenerates.
+
+Historically the second step has been written into a module built for one particular
+disturbance, so a new disturbance type means a new module, and the same scheduling and
+bookkeeping logic is written again each time.
+
+`Biomass_genericDisturbance` does the second step for **any** disturbance. You tell it, in
+your project's global script:
+
+> run function `F` immediately after module `M`'s event `E`
+
+and it schedules `F`, calls it, and adds whatever it returns to the simulation. One
+instance of this module can look after every disturbance in a simulation — harvest, fire,
+insects, thermokarst — because none of them is built into it.
+
+:::{.rmdimportant}
+**The science stays yours.** This module decides *when* your function runs and *what
+happens to its results*. It has no opinion about what a disturbance does. If your function
+is wrong about the ecology, this module will faithfully run it anyway.
+:::
+
+### A note on the name
+
+The `Biomass_` prefix shows the company this module usually keeps — the `Biomass_*` suite
+of LandR modules.
+
+## Packages this module installs
+
+The module's own machinery needs only `SpaDES.core` and `data.table`. It also lists
+**`LandR`** and **`disturbanceMgmt`** as required packages, so that the disturbance
+functions people most often reach for are installed and ready to name in a specification:
+
+- `LandR` provides `FireDisturbance()`, `FireDisturbancePM()` and `PeatlandThermokarst()`.
+- `disturbanceMgmt` provides `processPartialDist()` and `plantCohorts()`, for partial
+  disturbances such as harvest.
+
+**The module never calls either package.** Nothing in its code refers to them, and it
+works just as well with functions of your own, or from any other package. They are listed
+for convenience, not because the module depends on them — so if you supply only your own
+functions, these two will still be installed but never used.
+
+## Quick start
+
+A single disturbance, applied after a harvest planning module:
+
+```r
+simInit(
+  modules = list("myHarvestModule", "Biomass_genericDisturbance"),
+  params = list(
+    Biomass_genericDisturbance = list(
+      disturbances = list(
+        list(
+          fn         = myHarvestEffectFunction,
+          name       = "harvestDist",
+          after      = "myHarvestModule",
+          afterEvent = "harvest",
+          triggerObj = "rstCurrentHarvest"
+        )
+      )
+    )
+  )
+)
+```
+
+Two disturbances, each following its own module, in one simulation:
+
+```r
+disturbances = list(
+  list(fn = myHarvestEffectFunction, name = "harvestDist",
+       after = "myHarvestModule", afterEvent = "harvest",
+       triggerObj = "rstCurrentHarvest"),
+  list(fn = myFireEffectFunction, name = "fireDist",
+       after = "myFireModule", afterEvent = "burn",
+       triggerObj = "rstCurrentBurn")
+)
+```
+
+Adding a third disturbance type is another entry in this list. Nothing inside the module
+changes, and the existing entries are unaffected.
+
+## The `disturbances` parameter
+
+This parameter is the module's real interface. Each element of the list describes one
+disturbance.
+
+| Field | Required | Default | Meaning |
+|---|---|---|---|
+| `fn` | yes | — | The function to run. Either a function object, or a character string naming one, e.g. `"LandR::FireDisturbance"`. |
+| `name` | yes | — | A unique name for this disturbance. Used as the event name and in all messages. |
+| `after` | yes | — | The name of the module to follow. |
+| `afterEvent` | yes | — | Which of that module's events to follow. |
+| `offset` | no | `0.1` | How closely to follow the upstream event. See "Ordering" below. |
+| `triggerObj` | no | `NULL` | The name of a simulation object that must exist and be non-empty for the function to be called. When `NULL`, the function runs every time the upstream event does. |
+| `returnsAs` | no | `NULL` | The object name to store the result under, when the function returns a single object rather than a named list. |
+| `args` | no | `list()` | Extra arguments passed to the function. These take precedence over simulation objects of the same name. |
+
+`afterEvent` is required rather than optional because a planning module usually schedules
+several events — a `harvest` event, a `plot` event, an end-of-run summary. "After the
+module" would be ambiguous; "after the module's `harvest` event" is not.
+
+## What your function must look like
+
+Two shapes of function are supported. The module tells them apart by whether the function
+has an argument called `sim`.
+
+### Named arguments (recommended for new functions)
+
+Your function takes ordinary named arguments and returns a named list:
+
+```r
+myDisturbanceFunction <- function(cohortData, pixelGroupMap, currentTime) {
+  ## ... your science here ...
+  list(cohortData = cohortData, pixelGroupMap = pixelGroupMap)
+}
+```
+
+The module fills in the arguments by **matching their names to simulation objects**: an
+argument called `cohortData` receives `sim$cohortData`. An argument called `currentTime`
+receives the current simulation time. Anything listed in the specification's `args` wins
+over both. Anything that cannot be matched is left to your function's own default.
+
+Each element of the returned list is stored in the simulation **under its own name**, so
+returning `list(cohortData = ...)` replaces `sim$cohortData`.
+
+If your function returns a single object rather than a list, give the specification a
+`returnsAs` field saying what to call it.
+
+:::{.rmdcaution}
+**Defaults written in terms of `sim` will not work.** A function whose argument default is
+something like `cohortData = copy(sim$cohortData)` cannot be called by this module unless
+that argument is matched by name, because `sim` does not exist where the default would be
+evaluated. In practice the module matches every argument it can find by name, so such
+functions normally work — but do not *rely* on the default being evaluated.
+:::
+
+### Taking and returning the simulation
+
+For compatibility with functions already written in the older style, a function whose
+first argument is `sim` is simply handed the whole simulation and expected to return it:
+
+```r
+myDisturbanceFunction <- function(sim) {
+  sim$cohortData <- ...
+  invisible(sim)
+}
+```
+
+This works, but gives up something worth knowing about: because such a function writes to
+the simulation itself, **the module cannot report which objects it changed**. With the
+named-argument style, every object written is reported in the log. With this style, the
+log can only record that the function ran. Prefer named arguments for new functions.
+
+## Ordering: how "immediately after" works
+
+SpaDES has no way to say "run this module after that one". The event queue is sorted by
+**time**, and then by **priority** — a number where *lower runs first*. Module identity
+plays no part.
+
+So this module works out the priority for you. Each time a disturbance runs, it looks up
+when the upstream event is next scheduled and at what priority, and schedules itself at
+the same time, at that priority plus `offset` (0.1 by default). If your harvest event runs
+at priority 5, the disturbance runs at 5.1 — after harvest, and before anything at 6.
+
+Two consequences worth understanding:
+
+- **The cadence is inherited, not assumed.** The module does not assume disturbances are
+  annual. It looks up the upstream event's *next* occurrence each time, so a fire module
+  that runs every three years gets a disturbance every three years, and an irregular
+  schedule is followed exactly.
+- **Disturbances do not interfere with each other.** Each one sits just below its own
+  upstream event, so they occupy different parts of the ordering. Adding a disturbance
+  never changes when the others run.
+
+### The first timestep
+
+At the moment this module starts up, the other modules may not have scheduled anything
+yet, so there is nothing to follow. The module therefore runs a one-off `bootstrap` event
+at the very end of the first timestep, once every module has started, and works out each
+disturbance's schedule from there. If an upstream event has *already run* in that first
+timestep, its disturbance is scheduled immediately so the first timestep is not skipped.
+
+If a module is present but has not yet scheduled the event you named — because it starts
+later in the simulation — the module waits and checks again next year, reporting that it
+has done so.
+
+## When the module stops the simulation
+
+Several mistakes would otherwise produce a simulation that runs to completion and gives
+plausible but wrong answers. Those are treated as errors rather than warnings, because a
+warning is easy to miss in a long batch run:
+
+- The module named in `after` has no events at all — usually a misspelling, or a module
+  left out of the simulation.
+- Two disturbances would run at exactly the same time and priority, which would make their
+  order depend on module load order rather than on anything you specified.
+- A disturbance is about to run while the event it follows is still waiting to run.
+- `offset` is zero or negative, which would place the disturbance before the event it
+  follows.
+- A function returns a list with unnamed elements, or a single object with no `returnsAs`
+  to name it.
+- A `sim`-style function returns something that is not the simulation.
+- The simulation's time unit is not `"year"` (see "Limitations").
+
+## Limitations
+
+These are real constraints, not oversights. Read them before relying on the module.
+
+**It declares no inputs or outputs.** Look at this module's metadata and you will find
+`inputObjects` and `outputObjects` empty. That is deliberate: what the module reads and
+writes depends entirely on the functions you supply, and cannot be known in advance.
+
+The consequence is that **a downstream module cannot declare `expectsInput()` on anything
+this module produces**, because nothing declares that it is produced. If one of your
+disturbance functions creates an object that another module needs — a carbon flux, say —
+that dependency is real but invisible to SpaDES, and nothing will warn you if it breaks.
+The messages this module prints as it runs are the only record of what it wrote, which is
+why `verboseDisturbance` defaults to `TRUE`.
+
+**Anything your function returns will overwrite what is already there.** That is the point
+when it returns `cohortData`. But the same applies to a name you did not intend: a typo in
+a returned list's names will quietly replace an unrelated simulation object. The module
+cannot tell the difference, because it does not know what the names mean. Every write is
+reported in the log, so the damage is visible — but it is not prevented.
+
+**Ordering is checked; freshness is not.** The `triggerObj` check catches an object that is
+missing or empty. It cannot tell an object written in this timestep from one left over
+from a previous one. If an upstream module fails to update its output, the disturbance
+will be applied to stale information without complaint.
+
+**The simulation must use annual time.** The module reads event times from the queue and
+passes them back when scheduling, and these are interpreted in different units in the two
+places. They agree when everything is annual. Rather than convert — where a mistake would
+silently shift disturbances into the wrong years — the module stops if the simulation's
+time unit is not `"year"`.
+
+**Caching is not appropriate here.** Disturbances are typically stochastic, so caching this
+module's events would replay an old disturbance instead of generating a new one.
+`.useCache` defaults to `FALSE` and should normally stay that way.
+
+## Parameters
+
+```{r moduleParams, echo = FALSE, eval = TRUE, message = FALSE, warning = FALSE}
+df_params <- SpaDES.core::moduleParams("Biomass_genericDisturbance", "..")
+knitr::kable(df_params)
+```
+
+## Input objects
+
+None declared. See "Limitations" above: the objects read depend on the functions supplied
+through the `disturbances` parameter, and are validated when the simulation starts rather
+than by `simInit()`.
+
+## Output objects
+
+None declared, for the same reason. The module writes whatever the supplied functions
+return, and reports each object it writes.
+
+## Links to other modules
+
+This module is designed to follow any module that produces disturbance information. It has
+no required companions and no dependencies on other modules.
+
+---
+
+Drafted with assistance from Claude (Posit Assistant).
