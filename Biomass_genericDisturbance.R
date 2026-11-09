@@ -62,7 +62,18 @@ defineModule(sim, list(
         "to; required only when the function returns a single object rather than a named",
         "list or a simList;",
         "`args` (optional) a named list of extra arguments passed to the function, which",
-        "take precedence over objects of the same name found in the simList."
+        "take precedence over objects of the same name found in the simList;",
+        "`loopOver` (optional) the name of a simList object holding a list, to call the",
+        "function once per element of, each call acting on the results of the previous",
+        "one; typically a list of disturbance rasters, one per species;",
+        "`loopArg` (optional, with `loopOver`) the function argument that receives each",
+        "element of that list;",
+        "`loopNameArg` (optional, with `loopOver`) the function argument that receives",
+        "each element's name, for lists named by species;",
+        "`argsFn` (optional) a function that builds further arguments for each call,",
+        "used when an argument must be assembled from the current element rather than",
+        "passed straight through. It is given `item`, `itemName`, `currentTime` and",
+        "`sim`, and must return a named list of arguments."
       )
     ),
     defineParameter(
@@ -215,9 +226,9 @@ RunDisturbance <- function(sim, specName) {
 
   if (disturbanceTriggered(sim, spec, verbose = verbose)) {
     if (verbose) {
-      message("Biomass_genericDisturbance: running disturbance '", spec$name,
-              "' at time ", time(sim), ", after ", spec$after, "'s '",
-              spec$afterEvent, "' event.")
+      message("Biomass_genericDisturbance: running disturbance '", spec[["name"]],
+              "' at time ", time(sim), ", after ", spec[["after"]], "'s '",
+              spec[["afterEvent"]], "' event.")
     }
     sim <- callDisturbanceFn(sim, spec, verbose = verbose)
   }

@@ -89,7 +89,7 @@ validateOneSpec <- function(spec, index) {
   }
 
   known <- c("fn", "name", "after", "afterEvent", "offset", "triggerObj",
-             "returnsAs", "args")
+             "returnsAs", "args", "loopOver", "loopArg", "loopNameArg", "argsFn")
   unknown <- setdiff(names(spec), known)
   if (length(unknown) > 0L) {
     ## Silently ignoring an unknown field would quietly discard a setting the user meant
@@ -105,50 +105,86 @@ validateOneSpec <- function(spec, index) {
     }
   }
 
-  label <- paste0("Disturbance specification '", spec$name, "'")
+  label <- paste0("Disturbance specification '", spec[["name"]], "'")
 
-  spec$fn <- resolveDisturbanceFn(spec$fn, label = label)
+  spec[["fn"]] <- resolveDisturbanceFn(spec[["fn"]], label = label)
 
-  if (is.null(spec$offset)) {
-    spec$offset <- 0.1
+  if (is.null(spec[["offset"]])) {
+    spec[["offset"]] <- 0.1
   }
-  if (!is.numeric(spec$offset) || length(spec$offset) != 1L || is.na(spec$offset)) {
+  if (!is.numeric(spec[["offset"]]) || length(spec[["offset"]]) != 1L || is.na(spec[["offset"]])) {
     stop(label, " needs 'offset' to be a single number.")
   }
-  if (spec$offset <= 0) {
+  if (spec[["offset"]] <= 0) {
     ## A zero or negative offset would place the disturbance at or before the upstream
     ## event, so it would act on the previous timestep's results, or on nothing at all.
-    stop(label, " has offset ", spec$offset, ", which would schedule it at or before the ",
-         "'", spec$afterEvent, "' event it is supposed to follow (lower priority values ",
+    stop(label, " has offset ", spec[["offset"]], ", which would schedule it at or before the ",
+         "'", spec[["afterEvent"]], "' event it is supposed to follow (lower priority values ",
          "run first). Use a positive offset.")
   }
 
-  if (!is.null(spec$triggerObj)) {
-    if (!is.character(spec$triggerObj) || length(spec$triggerObj) != 1L ||
-        is.na(spec$triggerObj) || !nzchar(spec$triggerObj)) {
+  if (!is.null(spec[["triggerObj"]])) {
+    if (!is.character(spec[["triggerObj"]]) || length(spec[["triggerObj"]]) != 1L ||
+        is.na(spec[["triggerObj"]]) || !nzchar(spec[["triggerObj"]])) {
       stop(label, " needs 'triggerObj' to be a single non-empty character string naming ",
            "a simList object, or NULL to run every time.")
     }
   }
 
-  if (!is.null(spec$returnsAs)) {
-    if (!is.character(spec$returnsAs) || length(spec$returnsAs) != 1L ||
-        is.na(spec$returnsAs) || !nzchar(spec$returnsAs)) {
+  if (!is.null(spec[["returnsAs"]])) {
+    if (!is.character(spec[["returnsAs"]]) || length(spec[["returnsAs"]]) != 1L ||
+        is.na(spec[["returnsAs"]]) || !nzchar(spec[["returnsAs"]])) {
       stop(label, " needs 'returnsAs' to be a single non-empty character string naming ",
            "the simList object to assign an unnamed return value to, or NULL.")
     }
   }
 
-  if (is.null(spec$args)) {
-    spec$args <- list()
+  if (is.null(spec[["args"]])) {
+    spec[["args"]] <- list()
   }
-  if (!is.list(spec$args)) {
+  if (!is.list(spec[["args"]])) {
     stop(label, " needs 'args' to be a named list of extra arguments, or NULL.")
   }
-  if (length(spec$args) > 0L &&
-      (is.null(names(spec$args)) || any(!nzchar(names(spec$args))))) {
+  if (length(spec[["args"]]) > 0L &&
+      (is.null(names(spec[["args"]])) || any(!nzchar(names(spec[["args"]]))))) {
     stop(label, " needs every element of 'args' to be named, since the elements are ",
          "matched to the function's arguments by name.")
+  }
+
+  ## Looping. Some disturbance functions handle one piece of a disturbance at a time --
+  ## one species' harvest map, say -- and must be called once per element of a list, with
+  ## each call acting on the results of the last.
+  if (!is.null(spec[["loopOver"]])) {
+    if (!is.character(spec[["loopOver"]]) || length(spec[["loopOver"]]) != 1L ||
+        is.na(spec[["loopOver"]]) || !nzchar(spec[["loopOver"]])) {
+      stop(label, " needs 'loopOver' to be a single non-empty character string naming a ",
+           "simList object that holds a list to iterate over, or NULL not to loop.")
+    }
+    if (is.null(spec[["loopArg"]]) && is.null(spec[["loopNameArg"]]) && is.null(spec[["argsFn"]])) {
+      ## Looping without passing the element, its name, or anything derived from them
+      ## would call the function repeatedly with identical arguments.
+      stop(label, " sets 'loopOver' but gives no way to pass each element to the ",
+           "function. Add 'loopArg' (the argument that receives each element), ",
+           "'loopNameArg' (the argument that receives each element's name), or ",
+           "'argsFn' (a function building arguments from each element).")
+    }
+  } else if (!is.null(spec[["loopArg"]]) || !is.null(spec[["loopNameArg"]])) {
+    stop(label, " sets ", if (!is.null(spec[["loopArg"]])) "'loopArg'" else "'loopNameArg'",
+         " but not 'loopOver', so there is nothing to loop over. Add 'loopOver', naming ",
+         "the simList object holding the list.")
+  }
+
+  for (field in c("loopArg", "loopNameArg")) {
+    value <- spec[[field]]
+    if (!is.null(value) &&
+        (!is.character(value) || length(value) != 1L || is.na(value) || !nzchar(value))) {
+      stop(label, " needs '", field, "' to be a single non-empty character string naming ",
+           "an argument of the disturbance function.")
+    }
+  }
+
+  if (!is.null(spec[["argsFn"]])) {
+    spec[["argsFn"]] <- resolveDisturbanceFn(spec[["argsFn"]], label = paste0(label, "'s 'argsFn'"))
   }
 
   ## Which calling convention the function uses. A function with a `sim` argument is
@@ -157,7 +193,7 @@ validateOneSpec <- function(spec, index) {
   ## disturbance functions *mention* `sim` in their argument defaults, e.g.
   ## `cohortData = copy(sim$cohortData)`, without having a `sim` argument themselves --
   ## only an actual `sim` argument counts here.
-  spec$takesSim <- "sim" %in% names(formals(spec$fn))
+  spec[["takesSim"]] <- "sim" %in% names(formals(spec[["fn"]]))
 
   spec
 }

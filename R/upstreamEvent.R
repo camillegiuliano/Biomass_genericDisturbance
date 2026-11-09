@@ -23,10 +23,10 @@ findUpstreamEvent <- function(sim, spec, from = time(sim)) {
   ## from "this module is in the simulation but has not scheduled this event yet" matters:
   ## the first is a configuration error, the second is normal for a module that starts
   ## later than the others.
-  moduleScheduled <- any(queue$moduleName == spec$after)
+  moduleScheduled <- any(queue$moduleName == spec[["after"]])
 
-  matches <- queue[queue$moduleName == spec$after &
-                     queue$eventType == spec$afterEvent &
+  matches <- queue[queue$moduleName == spec[["after"]] &
+                     queue$eventType == spec[["afterEvent"]] &
                      !is.na(queue$eventTime) &
                      queue$eventTime >= from, ]
 
@@ -121,15 +121,15 @@ scheduleNextDisturbance <- function(sim, spec, isFirst = FALSE) {
         ## every module's `init` has run, is either not in the simulation or is misnamed.
         ## Falling back to a default schedule here would apply the disturbance at a time
         ## unrelated to the data it depends on.
-        stop("Disturbance '", spec$name, "' is set to follow the '", spec$afterEvent,
-             "' event of module '", spec$after, "', but that module has no events in the ",
+        stop("Disturbance '", spec[["name"]], "' is set to follow the '", spec[["afterEvent"]],
+             "' event of module '", spec[["after"]], "', but that module has no events in the ",
              "queue, even though every module's init event has now run. Check that '",
-             spec$after, "' is spelled correctly and is included in this simulation's ",
+             spec[["after"]], "' is spelled correctly and is included in this simulation's ",
              "list of modules.")
       }
       if (verbose) {
-        message("Biomass_genericDisturbance: module '", spec$after, "' has no further ",
-                "events scheduled, so disturbance '", spec$name, "' will not run again.")
+        message("Biomass_genericDisturbance: module '", spec[["after"]], "' has no further ",
+                "events scheduled, so disturbance '", spec[["name"]], "' will not run again.")
       }
       return(invisible(sim))
     }
@@ -139,9 +139,9 @@ scheduleNextDisturbance <- function(sim, spec, isFirst = FALSE) {
     ## failing, since the event may yet appear.
     if (isFirst) {
       if (verbose) {
-        message("Biomass_genericDisturbance: module '", spec$after, "' is present but has ",
-                "not yet scheduled its '", spec$afterEvent, "' event, so disturbance '",
-                spec$name, "' cannot be placed yet. Will check again next year.")
+        message("Biomass_genericDisturbance: module '", spec[["after"]], "' is present but has ",
+                "not yet scheduled its '", spec[["afterEvent"]], "' event, so disturbance '",
+                spec[["name"]], "' cannot be placed yet. Will check again next year.")
       }
       retryTime <- time(sim) + 1
       attr(retryTime, "unit") <- "year"
@@ -151,8 +151,8 @@ scheduleNextDisturbance <- function(sim, spec, isFirst = FALSE) {
     }
 
     if (verbose) {
-      message("Biomass_genericDisturbance: module '", spec$after, "' has no further '",
-              spec$afterEvent, "' events scheduled, so disturbance '", spec$name,
+      message("Biomass_genericDisturbance: module '", spec[["after"]], "' has no further '",
+              spec[["afterEvent"]], "' events scheduled, so disturbance '", spec[["name"]],
               "' will not run again.")
     }
     return(invisible(sim))
@@ -165,17 +165,17 @@ scheduleNextDisturbance <- function(sim, spec, isFirst = FALSE) {
   ## otherwise land in year 3.
   nextTime <- upstream$eventTime
   attr(nextTime, "unit") <- "year"
-  nextPriority <- upstream$eventPriority + spec$offset
+  nextPriority <- upstream$eventPriority + spec[["offset"]]
 
   if (verbose) {
-    message("Biomass_genericDisturbance: scheduling disturbance '", spec$name,
+    message("Biomass_genericDisturbance: scheduling disturbance '", spec[["name"]],
             "' for time ", nextTime, " at priority ", nextPriority,
-            ", following '", spec$after, "' event '", spec$afterEvent,
+            ", following '", spec[["after"]], "' event '", spec[["afterEvent"]],
             "' at priority ", upstream$eventPriority, ".")
   }
 
   sim <- scheduleEvent(sim, nextTime, "Biomass_genericDisturbance",
-                       spec$name, nextPriority)
+                       spec[["name"]], nextPriority)
 
   return(invisible(sim))
 }
@@ -198,8 +198,8 @@ checkDisturbanceLadder <- function(sim, spec) {
   ## Only events at this timestep matter: the question is whether the upstream event ran
   ## before this one, now. An upstream event still sitting in the queue at the current
   ## time with a priority at or below this disturbance's own means it has not run yet.
-  current <- queue[queue$moduleName == spec$after &
-                     queue$eventType == spec$afterEvent &
+  current <- queue[queue$moduleName == spec[["after"]] &
+                     queue$eventType == spec[["afterEvent"]] &
                      !is.na(queue$eventTime) &
                      abs(queue$eventTime - time(sim)) < .Machine$double.eps^0.5, ]
 
@@ -207,10 +207,10 @@ checkDisturbanceLadder <- function(sim, spec) {
     return(invisible(NULL))
   }
 
-  stop("Disturbance '", spec$name, "' is running at time ", time(sim),
-       ", but the '", spec$afterEvent, "' event of module '", spec$after,
+  stop("Disturbance '", spec[["name"]], "' is running at time ", time(sim),
+       ", but the '", spec[["afterEvent"]], "' event of module '", spec[["after"]],
        "' is still scheduled at this same time and has not run yet. The disturbance ",
-       "would be applied to out-of-date information. This usually means '", spec$after,
+       "would be applied to out-of-date information. This usually means '", spec[["after"]],
        "' changed the priority of its own events during the simulation. Adjust the ",
        "'offset' of this disturbance specification.")
 }
@@ -238,8 +238,8 @@ upstreamRanThisTimestep <- function(sim, spec) {
     return(NULL)
   }
 
-  matches <- done[done$moduleName == spec$after &
-                    done$eventType == spec$afterEvent &
+  matches <- done[done$moduleName == spec[["after"]] &
+                    done$eventType == spec[["afterEvent"]] &
                     !is.na(done$eventTime) &
                     abs(as.numeric(done$eventTime) - time(sim)) < .Machine$double.eps^0.5, ]
 

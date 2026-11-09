@@ -20,6 +20,11 @@ First working version.
   unknown upstream module, two disturbances scheduled at the same time and priority, a
   disturbance running before the event it follows, or a return value with no usable name —
   stop the simulation rather than warning.
+* Can call a disturbance function once per element of a list, for planning modules that
+  produce one disturbance layer per species. Set `loopOver` to the list's name, and use
+  `loopArg`, `loopNameArg` or `argsFn` to pass each element, its name, or arguments built
+  from them. Each call acts on the results of the previous one, so changes accumulate
+  across the list.
 * Lists `LandR` and `disturbanceMgmt` among its required packages, so that commonly used
   disturbance functions such as `FireDisturbance()` and `processPartialDist()` are
   installed and available to name in a disturbance specification. The module does not call

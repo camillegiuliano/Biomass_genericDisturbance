@@ -125,10 +125,82 @@ disturbance.
 | `triggerObj` | no | `NULL` | The name of a simulation object that must exist and be non-empty for the function to be called. When `NULL`, the function runs every time the upstream event does. |
 | `returnsAs` | no | `NULL` | The object name to store the result under, when the function returns a single object rather than a named list. |
 | `args` | no | `list()` | Extra arguments passed to the function. These take precedence over simulation objects of the same name. |
+| `loopOver` | no | `NULL` | The name of a simulation object holding a list, to call the function once per element of. See "Looping" below. |
+| `loopArg` | no | `NULL` | Which function argument receives each element of that list. |
+| `loopNameArg` | no | `NULL` | Which function argument receives each element's *name*. |
+| `argsFn` | no | `NULL` | A function that builds further arguments for each call, when an argument must be assembled from the current element rather than passed straight through. |
 
 `afterEvent` is required rather than optional because a planning module usually schedules
 several events — a `harvest` event, a `plot` event, an end-of-run summary. "After the
 module" would be ambiguous; "after the module's `harvest` event" is not.
+
+## Looping over a list of disturbance layers
+
+Planning modules often produce not one disturbance layer but a **named list** of them —
+commonly one raster per species. The matching disturbance function usually handles a
+single layer at a time, so it has to be called once per element, with each call acting on
+the results of the one before.
+
+Set `loopOver` to the name of the list, and the module runs that loop for you:
+
+```r
+list(
+  fn         = disturbanceMgmt::processPartialDist,
+  name       = "harvestDist",
+  after      = "simpleHarvestPlanning",
+  afterEvent = "harvest",
+  triggerObj = "rstCurrentHarvest",
+
+  loopOver   = "speciesHarvestMaps",   # the list, one raster per species
+  loopArg    = "partialDistLoc",       # each raster goes to this argument
+
+  ## `partialDistTable` isn't in the simList: it has to be built for each species
+  ## from that element's name and the current year.
+  argsFn = function(item, itemName, currentTime, sim) {
+    list(partialDistTable = data.table::data.table(speciesCode = itemName,
+                                                   distYear    = currentTime))
+  }
+)
+```
+
+Each call is given the simulation **as the previous call left it**, so changes accumulate
+across species rather than each call overwriting the last one's work. With a list of two
+species, the function runs twice per timestep, and the second call sees the `cohortData`
+produced by the first.
+
+### Which of the three loop fields to use
+
+- **`loopArg`** — the element itself is an argument. The usual case: each raster goes
+  straight to the function's `partialDistLoc` (or equivalent) argument.
+- **`loopNameArg`** — the element's *name* is an argument, for a function that takes a
+  species code directly. Requires every element of the list to be named.
+- **`argsFn`** — an argument has to be **built** from the element. In the example above,
+  `processPartialDist()` wants a `partialDistTable` with `speciesCode` and `distYear`
+  columns; no such object exists in the simulation, so it is assembled per species. The
+  function is given `item`, `itemName`, `currentTime` and `sim`, and must return a named
+  list of arguments.
+
+Use any combination. At least one is required when `loopOver` is set, since looping
+without passing the element would call the function repeatedly with identical arguments —
+the module stops rather than let that happen.
+
+:::{.rmdnote}
+**Supplying several inputs to one function** does not require looping. Arguments are
+matched to simulation objects by name automatically, so a function taking `cohortData`,
+`pixelGroupMap` and `species` receives all three. Use `args` for anything constant that
+isn't in the simulation, and `argsFn` for anything that must be computed per call.
+:::
+
+### Where the list comes from
+
+`loopOver` names a simulation object, so the list can come from the upstream module (as
+`speciesHarvestMaps` does), from another module, or from your global script via
+`simInit(objects = ...)`. The module does not care which.
+
+If the named list is empty or missing at a given timestep, the disturbance is skipped with
+a message rather than treated as an error — an empty list of harvest maps is a normal
+"nothing happened this year". A `loopOver` naming an object that is *never* in the
+simulation is an error.
 
 ## What your function must look like
 
